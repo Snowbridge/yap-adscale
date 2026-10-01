@@ -1,0 +1,136 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+HIDE_STEREOTYPE()
+LAYOUT_LEFT_RIGHT()
+
+' Переопределение стилей легенды: C4-PlantUML по умолчанию делает её невидимой
+skinparam legendFontColor #000000
+skinparam legendBackgroundColor #FFFFFF
+skinparam legendBorderColor #888888
+
+title C4 Container Diagram — AdScale (TO-BE, горизонт 12 месяцев)
+
+' ====================== Акторы ======================
+Person(advertiser, "Рекламодатель", "Настраивает кампании, бюджеты, ставки, шаблоны контента; работает с отчётностью")
+Person_Ext(endUser, "Пользователь сайта/приложения", "Просматривает рекламу, кликает по баннерам")
+
+' ====================== Внешние системы ======================
+System_Ext(dspPartner, "DSP-партнёр", "Bid requests / responses по OpenRTB. SLA ≤ 80 ms")
+System_Ext(sspPartner, "SSP / Площадки", "Сайты и приложения, запрашивающие рекламу для показа")
+System_Ext(paymentGateway, "Платёжный шлюз", "Пополнение рекламных бюджетов")
+System_Ext(emailService, "Email-сервис (SMTP)", "Доставка автоматических отчётов")
+
+' ====================== Входной контур (edge) ======================
+Container_Boundary(edge, "Входной контур AdScale (Edge)") {
+    Container(rtbGateway, "RTB / Telemetry Gateway", "Envoy / Nginx", "Hot path. Принимает bid requests (DSP, SSP) и события показов/кликов; сегрегирует потоки: bid requests → RTB Core, телеметрия → Telemetry Ingest") <<Hot Path>>
+    Container(telemetryIngest, "Telemetry Ingest", "Go", "Лёгкий stateless-сервис: валидирует события показов/кликов и публикует их в Kafka без синхронной записи в БД")
+    Container(uiGateway, "API Gateway (UI)", "Kong / Nginx", "Трафик веб-интерфейсов рекламодателя; изолирован от hot path RTB")
+    Container(identity, "Identity / Auth", "Keycloak / OIDC", "Аутентификация рекламодателей, выпуск и валидация токенов для обоих UI")
+}
+
+' ====================== Подсистема 1: Аукционы и Выдача рекламы ======================
+Container_Boundary(rtbCore, "Подсистема «Аукционы и Выдача рекламы» (RTB Core & Delivery)") {
+    Container(rtbServices, "Микросервисы RTB", "C++ / Go", "Приём bid request, таргетинг и подбор кандидатов, аукцион, рендеринг разметки баннера. Все данные — только из Redis") <<Critical Path>>
+    ContainerDb(redis, "Redis", "Redis Cluster (persistent, replicated)", "Кампании, бизнес-правила торгов, лимиты и бюджеты, балансы взаиморасчётов, счётчики показов/кликов, шаблоны контента")
+}
+
+' ====================== Подсистема 2: Управление кампаниями и ставками ======================
+Container_Boundary(campaignMgmt, "Подсистема «Управление кампаниями и ставками» (Campaign & Bid Management)") {
+    Container(campaignUI, "Web UI кабинета рекламодателя", "SPA, JavaScript", "Настройка кампаний, бизнес-правил торгов, лимитов, бюджетов и шаблонов контента")
+    Container(campaignServices, "Микросервисы кампаний", "Go / Node.js", "Кампании, бюджеты, стратегии ставок, шаблоны; батчевая агрегация телеметрии для контроля лимитов и расхода")
+    ContainerDb(campaignDb, "PostgreSQL", "PostgreSQL", "Кампании, правила, лимиты, бюджеты, шаблоны, агрегаты расхода по кампаниям")
+}
+
+' ====================== Шина событий ======================
+ContainerQueue(kafka, "Kafka", "Apache Kafka", "Топики: telemetry.events (показы/клики), auction.events (bid/win/no-bid), campaign.config (лимиты, бюджеты, правила, шаблоны), campaign.spend (агрегаты расхода), billing.balance (взаиморасчёты)")
+
+' ====================== Подсистема 3: Финансы и Биллинг ======================
+Container_Boundary(billing, "Подсистема «Финансы и Биллинг» (Billing & Finance)") {
+    Container(billingServices, "Микросервисы биллинга", "Go", "Списание средств, инвойсирование, учёт и сверка взаиморасчётов (строгий ACID-контур)")
+    ContainerDb(billingDb, "PostgreSQL", "PostgreSQL", "Балансы, транзакции, счета, акты сверки")
+}
+
+' ====================== Подсистема 4: Телеметрия и Отчётность ======================
+Container_Boundary(telemetry, "Подсистема «Телеметрия и Отчётность» (Telemetry & Analytics)") {
+    Container(reportingUI, "Web UI отчётности", "SPA, JavaScript", "Формирование отчётов, настройка расписаний и рассылок")
+    Container(telemetryServices, "Микросервисы телеметрии", "Python / Go", "Запись каждого события в ClickHouse, агрегация для OLAP, построение отчётов, автоформирование и рассылка по расписанию")
+    ContainerDb(clickhouse, "ClickHouse", "ClickHouse", "Сырые события показов/кликов/аукционов + агрегаты (materialized views) для OLAP-отчётности")
+}
+
+' ====================== Внешние связи ======================
+Rel(dspPartner, rtbGateway, "Bid requests / responses", "HTTPS / OpenRTB")
+Rel(sspPartner, rtbGateway, "Запросы на показ / разметка баннера", "HTTPS")
+Rel(endUser, rtbGateway, "Показы и клики (beacon), загрузка баннера", "HTTPS")
+Rel(advertiser, campaignUI, "Управляет кампаниями и бюджетами", "HTTPS")
+Rel(advertiser, reportingUI, "Формирует отчёты, настраивает рассылки", "HTTPS")
+Rel(billingServices, paymentGateway, "Пополнение бюджета, подтверждение платежей", "HTTPS / REST")
+Rel(telemetryServices, emailService, "Рассылка отчётов по расписанию", "SMTP / API")
+
+' ====================== UI-контур ======================
+Rel(campaignUI, uiGateway, "API кабинета", "HTTPS / REST")
+Rel(reportingUI, uiGateway, "API отчётности", "HTTPS / REST")
+Rel(uiGateway, identity, "Аутентификация, валидация токенов", "OIDC / JWT")
+Rel(uiGateway, campaignServices, "Маршрутизация запросов кабинета", "REST")
+Rel(uiGateway, telemetryServices, "Маршрутизация запросов отчётности", "REST")
+
+' ====================== Hot path (RTB) ======================
+Rel(rtbGateway, rtbServices, "Bid requests, запросы на показ", "HTTP/2 / gRPC")
+Rel(rtbGateway, telemetryIngest, "События показов и кликов", "HTTP")
+Rel(telemetryIngest, kafka, "Публикует telemetry.events", "Kafka Producer")
+BiRel(rtbServices, redis, "Читает правила, кандидатов, лимиты, балансы, шаблоны; обновляет счётчики", "Redis Protocol")
+Rel(kafka, rtbServices, "Подписка: campaign.config, billing.balance, telemetry.events → актуализация Redis", "Kafka Consumer")
+Rel(rtbServices, kafka, "Публикует auction.events (bid / win / no-bid)", "Kafka Producer")
+
+' ====================== Управление кампаниями ======================
+Rel(campaignServices, campaignDb, "Кампании, правила, лимиты, агрегаты расхода", "SQL")
+Rel(kafka, campaignServices, "Подписка: telemetry.events (батчи → агрегаты расхода), billing.balance", "Kafka Consumer")
+Rel(campaignServices, kafka, "Публикует campaign.config (лимиты, бюджеты, правила, шаблоны), campaign.spend", "Kafka Producer")
+Rel(campaignServices, billingServices, "Баланс и счета для отображения в кабинете", "REST (sync, некритичный путь)")
+
+' ====================== Финансы и Биллинг ======================
+Rel(billingServices, billingDb, "Транзакции, балансы, инвойсы", "SQL")
+Rel(kafka, billingServices, "Подписка: campaign.spend → списания", "Kafka Consumer")
+Rel(billingServices, kafka, "Публикует billing.balance", "Kafka Producer")
+
+' ====================== Телеметрия и Отчётность ======================
+Rel(kafka, telemetryServices, "Подписка: telemetry.events, auction.events → запись каждого события", "Kafka Consumer")
+Rel(telemetryServices, clickhouse, "Сырые события, агрегаты (MV), отчётные запросы", "Native / HTTP")
+Rel(telemetryServices, campaignServices, "Справочник кампаний и рекламодателей", "REST (sync, некритичный путь)")
+
+' ====================== Layout hints ======================
+Lay_R(dspPartner, sspPartner)
+Lay_R(sspPartner, endUser)
+Lay_R(endUser, advertiser)
+Lay_R(paymentGateway, emailService)
+
+' ====================== Аннотации ======================
+note right of rtbServices
+  **Hot path без PostgreSQL**
+  Все правила, кандидаты, лимиты, балансы
+  и шаблоны — из Redis; актуализация
+  через подписку на топики Kafka
+end note
+
+note right of kafka
+  **Разделение потоков**
+  Критичный путь (bid) и некритичный
+  (телеметрия, биллинг, отчётность)
+  связаны только через события
+end note
+
+' ====================== Легенда с целевыми метриками и принципами ======================
+legend right
+  **Целевые показатели (12 месяцев)**
+  <color:#00AA00>**50 000 RPS** на RTB-контуре</color>
+  <color:#00AA00>**P95 ≤ 100 ms** (внутренний SLA), **≤ 80 ms** для DSP</color>
+  <color:#00AA00>**SLA 99,9%**, мультирегион</color>
+  --
+  **Принципы**
+  <color:#555555>Микросервисы внутри подсистем (детализация на уровне компонентов)</color>
+  <color:#555555>Database per subsystem: Redis / PostgreSQL / PostgreSQL / ClickHouse</color>
+  <color:#555555>Событийно-ориентированная интеграция через Kafka</color>
+  <color:#555555>Sync REST — только в некритичных UI-сценариях</color>
+  <color:#555555>Агрегаты кампаний (лимиты, бюджеты) ≠ агрегаты отчётности (аналитика)</color>
+endlegend
+@enduml

@@ -1,0 +1,31 @@
+@startuml
+title CQRS — write models и read projections
+
+skinparam componentStyle rectangle
+
+database "campaign-db\n(Write)" as CampW
+database "billing-db\n(Write)" as BillW
+queue "Kafka" as K
+database "RTB Redis\n(Read)" as RedisR
+database "ClickHouse\n(Read)" as CHR
+database "campaign-db\n(Read UI)" as CampR
+
+CampW --> K : campaign.config\ncampaign.spend
+BillW --> K : billing.balance
+K --> RedisR : Cache Projector
+K --> CHR : telemetry-ch-writer
+K --> CampW : spend aggregator\n(telemetry.events)
+
+CampW --> CampR : sync API\n(primary)
+
+note right of RedisR
+  Hot path RTB
+  eventual consistency
+end note
+
+note right of CHR
+  OLAP reports only
+  not for billing limits
+end note
+
+@enduml

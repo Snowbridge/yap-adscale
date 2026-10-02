@@ -1,0 +1,50 @@
+@startuml
+title Резервное копирование и порядок восстановления
+
+skinparam activityStyle rectangle
+
+start
+
+partition "Регулярный backup" {
+  :PostgreSQL WAL + daily full\n→ object storage;
+  :Redis RDB snapshot + AOF;
+  :ClickHouse BACKUP → S3;
+  :Kafka RF=3 retention buffer;
+}
+
+partition "Инцидент: потеря RTB Redis" {
+  :Поднять новый Redis Cluster;
+  :Запустить Cache Projector\nreplay campaign.config + billing.balance;
+  :Проверить config:version;
+  :Включить RTB traffic;
+}
+
+partition "Инцидент: потеря campaign-db primary" {
+  :Promote read replica или restore PITR;
+  :Проверить целостность spend_agg;
+  :Re-publish campaign.config при необходимости;
+}
+
+partition "Инцидент: потеря billing-db" {
+  :Promote sync standby / PITR;
+  :Сверка балансов с campaign.spend log;
+  :Re-publish billing.balance;
+}
+
+partition "Инцидент: потеря ClickHouse" {
+  :Restore from S3 backup;
+  if (backup недостаточен?) then (yes)
+    :Re-ingest из Kafka\nв пределах retention;
+  else (no)
+  endif
+  :Rebuild materialized views;
+}
+
+stop
+
+note right
+  RPO/RTO детали
+  ADR-014
+end note
+
+@enduml

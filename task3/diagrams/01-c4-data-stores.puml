@@ -1,0 +1,60 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+HIDE_STEREOTYPE()
+LAYOUT_LEFT_RIGHT()
+
+title C4 Container — хранилища данных по bounded context (Task 3)
+
+Person(advertiser, "Рекламодатель", "Кабинет и отчёты")
+
+Container_Boundary(rtb, "RTB Core and Delivery") {
+    Container(rtbSvc, "RTB Services", "C++ / Go", "Targeting, Bidding, Creative; hot path only Redis")
+    Container(projector, "Cache Projector", "Go", "Kafka → Redis")
+    ContainerDb(redis, "Redis Cluster", "Redis", "Операционная проекция торгов")
+}
+
+Container_Boundary(camp, "Campaign and Bid Management") {
+    Container(campSvc, "Campaign Services", "Go", "API + Spend Aggregator")
+    ContainerDb(campDb, "campaign-db", "PostgreSQL", "Кампании, spend_agg")
+}
+
+Container_Boundary(bill, "Billing and Finance") {
+    Container(billSvc, "Billing Services", "Go", "Списания, инвойсы")
+    ContainerDb(billDb, "billing-db", "PostgreSQL", "Транзакции, балансы")
+}
+
+Container_Boundary(tel, "Telemetry and Analytics") {
+    Container(telSvc, "Telemetry Services", "Go / Python", "CH writer, отчёты")
+    ContainerDb(ch, "ClickHouse", "ClickHouse", "Сырые события, OLAP MV")
+}
+
+ContainerQueue(kafka, "Kafka", "Apache Kafka", "telemetry, auction, campaign, billing topics")
+
+Rel(advertiser, campSvc, "HTTPS REST", "Кабинет")
+Rel(advertiser, telSvc, "HTTPS REST", "Отчёты")
+Rel(rtbSvc, redis, "Read/Write", "Redis")
+Rel(projector, redis, "Projection", "Redis")
+Rel(campSvc, campDb, "OLTP", "SQL")
+Rel(billSvc, billDb, "ACID", "SQL")
+Rel(telSvc, ch, "Insert/Query", "Native")
+Rel(kafka, projector, "campaign.config, billing.balance", "Consumer")
+Rel(kafka, campSvc, "telemetry.events", "Consumer")
+Rel(kafka, billSvc, "campaign.spend", "Consumer")
+Rel(kafka, telSvc, "telemetry, auction", "Consumer")
+Rel(campSvc, kafka, "campaign.config, campaign.spend", "Producer")
+Rel(billSvc, kafka, "billing.balance", "Producer")
+Rel(rtbSvc, kafka, "auction.events", "Producer")
+
+note right of redis
+  **Нет PostgreSQL**
+  Source of truth — PG соседей + Kafka
+  ADR-006, ADR-010
+end note
+
+note bottom of campDb
+  **Отдельный инстанс**
+  от billing-db (ADR-009)
+end note
+
+@enduml

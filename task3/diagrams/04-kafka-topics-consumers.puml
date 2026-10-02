@@ -1,0 +1,54 @@
+@startuml
+title Kafka — топики, partition keys и consumer groups
+
+skinparam componentStyle rectangle
+
+actor "Telemetry Ingest" as Ingest
+actor "RTB Bidding" as RTB
+actor "Campaign Services" as Camp
+actor "Billing" as Bill
+
+queue "telemetry.events\nkey: campaign_id\nAvro" as T1
+queue "auction.events\nkey: campaign_id\nAvro" as T2
+queue "campaign.config\nkey: campaign_id\nJSON compacted" as T3
+queue "campaign.spend\nkey: campaign_id\nJSON" as T4
+queue "billing.balance\nkey: advertiser_id\nJSON compacted" as T5
+
+component "cg: telemetry-ch-writer" as CG1
+component "cg: campaign-spend-aggregator" as CG2
+component "cg: rtb-cache-projector" as CG3
+component "cg: billing-deduction" as CG4
+component "cg: campaign-balance-ui" as CG5
+
+database "ClickHouse" as CH
+database "campaign-db" as CampDB
+database "billing-db" as BillDB
+database "RTB Redis" as Redis
+
+Ingest --> T1
+RTB --> T2
+Camp --> T3
+Camp --> T4
+Bill --> T5
+
+T1 --> CG1
+T2 --> CG1
+T1 --> CG2
+T3 --> CG3
+T5 --> CG3
+T4 --> CG4
+T5 --> CG5
+
+CG1 --> CH
+CG2 --> CampDB
+CG2 --> T4
+CG3 --> Redis
+CG4 --> BillDB
+CG5 --> Camp
+
+note bottom of T1
+  JitterTopic + DLQ
+  per ADR-008
+end note
+
+@enduml

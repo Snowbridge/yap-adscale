@@ -1,0 +1,48 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+HIDE_STEREOTYPE()
+LAYOUT_TOP_DOWN()
+
+title C4 Component — RTB подсистема (Bidding Service и окружение)
+
+Person_Ext(dsp, "DSP-партнёр", "OpenRTB bid requests, SLA ≤ 80 ms")
+
+System_Boundary(rtbSubsystem, "Подсистема «Аукционы и Выдача рекламы»") {
+    Container_Boundary(edge, "Edge") {
+        Component(gateway, "RTB Gateway", "Envoy / Nginx", "TLS, auth, rate limit, CB, OpenRTB ↔ gRPC")
+        Component(ingest, "Telemetry Ingest", "Go", "События показов/кликов → Kafka")
+    }
+
+    Component(orchestrator, "Bid Orchestrator", "Go", "Цепочка gRPC: Targeting → Bidding → Creative")
+    Component(targeting, "Targeting Service", "Go / C++", "User matching, индекс кандидатов")
+    Component(bidding, "Bidding Service", "Go / C++", "Аукцион, стратегии ставок, лимиты, no-bid") <<Critical>>
+    Component(creative, "Creative Delivery", "Go", "Разметка adm / HTML-JS")
+    Component(projector, "Cache Projector", "Go", "Kafka consumers → Redis, вне hot path")
+
+    ContainerDb(redis, "Redis Cluster", "Redis", "Проекция кампаний, лимитов, балансов, счётчиков")
+    ContainerQueue(kafka, "Kafka", "Apache Kafka", "telemetry.events, auction.events, campaign.config, billing.balance")
+}
+
+Rel(dsp, gateway, "Bid request / response", "HTTPS OpenRTB")
+Rel(gateway, orchestrator, "Unary gRPC, deadline 70ms", "gRPC")
+Rel(orchestrator, targeting, "GetCandidates", "gRPC")
+Rel(orchestrator, bidding, "EvaluateBid", "gRPC")
+Rel(orchestrator, creative, "RenderCreative", "gRPC")
+
+Rel(targeting, redis, "Read index, meta", "Redis")
+Rel(bidding, redis, "Read rules/limits; reserve counters", "Redis")
+Rel(creative, redis, "Read templates", "Redis")
+
+Rel(bidding, kafka, "auction.events (async)", "Kafka Producer")
+Rel(kafka, projector, "campaign.config, billing.balance", "Consumer")
+Rel(projector, redis, "Atomic config swap", "Redis")
+Rel(ingest, kafka, "telemetry.events", "Producer")
+
+note right of bidding
+  **Hot path без PostgreSQL**
+  Нет sync вызовов Campaign/Billing
+  См. ADR-006 Task1
+end note
+
+@enduml

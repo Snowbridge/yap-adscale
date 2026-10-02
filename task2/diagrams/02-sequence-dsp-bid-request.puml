@@ -1,0 +1,59 @@
+@startuml
+title Sequence — DSP bid request (happy path)
+
+skinparam sequenceMessageAlign center
+autonumber
+
+actor DSP as "DSP-партнёр"
+participant GW as "RTB Gateway"
+participant Orch as "Bid Orchestrator"
+participant T as "Targeting Service"
+participant B as "Bidding Service"
+participant C as "Creative Delivery"
+database R as "Redis"
+queue K as "Kafka"
+
+DSP -> GW : POST /openrtb2/bid\n(OpenRTB BidRequest, tmax=80ms)
+activate GW
+GW -> GW : TLS, partner auth, rate limit
+GW -> GW : Parse JSON, trace id = request.id
+
+GW -> Orch : gRPC pipeline (deadline 70ms)
+activate Orch
+
+Orch -> T : GetCandidates(context)
+activate T
+T -> R : MGET idx, campaign meta
+activate R
+R --> T : candidates[]
+deactivate R
+T --> Orch : GetCandidatesResponse
+deactivate T
+
+Orch -> B : EvaluateBid(candidates, context)
+activate B
+B -> R : Read bid_rules, limits, balance
+B -> R : Lua: check budget, run auction
+B --> Orch : EvaluateBidResponse (BID, price)
+deactivate B
+
+Orch -> C : RenderCreative(creative_id, context)
+activate C
+C -> R : Read template
+C --> Orch : adm / markup
+deactivate C
+
+Orch --> GW : Bid pipeline result
+deactivate Orch
+
+GW -> GW : Build OpenRTB BidResponse
+GW --> DSP : HTTP 200 BidResponse
+deactivate GW
+
+B ->> K : auction.events (bid, async, fire-and-forget)
+note over B,K
+  Не блокирует ответ DSP
+  ADR-006
+end note
+
+@enduml

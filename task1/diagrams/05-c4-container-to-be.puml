@@ -61,7 +61,7 @@ Container_Boundary(telemetry, "Подсистема «Телеметрия и О
 ' ====================== Внешние связи ======================
 Rel(dspPartner, rtbGateway, "Bid requests / responses", "HTTPS / OpenRTB")
 Rel(sspPartner, rtbGateway, "Запросы на показ / разметка баннера", "HTTPS")
-Rel(endUser, rtbGateway, "Показы и клики (beacon), загрузка баннера", "HTTPS")
+Rel(endUser, rtbGateway, "Показы и клики (события), загрузка баннера", "HTTPS")
 Rel(advertiser, campaignUI, "Управляет кампаниями и бюджетами", "HTTPS")
 Rel(advertiser, reportingUI, "Формирует отчёты, настраивает рассылки", "HTTPS")
 Rel(billingServices, paymentGateway, "Пополнение бюджета, подтверждение платежей", "HTTPS / REST")

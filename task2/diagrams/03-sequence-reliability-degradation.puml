@@ -1,0 +1,54 @@
+@startuml
+title Sequence — деградация, Circuit Breaker, идемпотентность
+
+skinparam sequenceMessageAlign center
+
+== Circuit Breaker open (upstream недоступен) ==
+
+actor DSP as "DSP"
+participant GW as "RTB Gateway"
+participant Orch as "Bid Orchestrator"
+
+DSP -> GW : POST bid request
+activate GW
+GW -> GW : CB state = OPEN
+GW --> DSP : HTTP 200 empty seatbid / nbr\n(fast-fail < 5ms)
+deactivate GW
+note right of GW
+  Без ожидания tmax
+  Outlier detection / 5xx threshold
+end note
+
+== Stale Redis projection ==
+
+participant B as "Bidding Service"
+database R as "Redis"
+
+GW -> Orch : EvaluateBid chain
+activate Orch
+Orch -> B : EvaluateBid
+activate B
+B -> R : Read config_version
+R --> B : version stale / key missing
+B --> Orch : NO_BID, nbr=config
+deactivate B
+Orch --> GW : no-bid
+deactivate Orch
+GW --> DSP : OpenRTB no-bid (FR-5)
+
+== Повтор request_id (идемпотентность) ==
+
+DSP -> GW : POST same request.id
+GW -> B : EvaluateBid / GetBidDecision
+activate B
+B -> R : GET bid:dedup:{request_id}
+R --> B : cached EvaluateBidResponse
+B --> GW : same bid as first request
+deactivate B
+GW --> DSP : Identical BidResponse
+note over B,R
+  Dedup window ~60s
+  Без повторного резерва в Redis
+end note
+
+@enduml

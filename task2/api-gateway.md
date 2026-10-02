@@ -125,13 +125,17 @@ Audit log: `dsp_partner_id`, `request_id`, timestamp, result code — без П�
 
 ### 5.2 Таймауты и бюджет SLA
 
-| Этап                        | Timeout                                 |
-|-----------------------------|-----------------------------------------|
-| Полный запрос DSP → Gateway | ≤ partner `tmax` (80 ms)                |
-| Gateway → upstream gRPC     | **70 ms** (буфер на TLS и сериализацию) |
-| Targeting                   | 25 ms (budget)                          |
-| Bidding                     | 35 ms                                   |
-| Creative                    | 15 ms                                   |
+| Этап                            | Timeout                                 |
+|---------------------------------|-----------------------------------------|
+| Полный запрос DSP → Gateway     | ≤ partner `tmax` (80 ms)                |
+| Overhead edge (TLS, parse, route) | **5 ms** (p95, в обе стороны)         |
+| Gateway → upstream gRPC         | **70 ms** (буфер на TLS и сериализацию) |
+| Bid Orchestrator + сеть         | 5 ms                                    |
+| Targeting                       | 20 ms (budget)                          |
+| Bidding                         | 35 ms                                   |
+| Creative                        | 10 ms                                   |
+
+**Сходимость бюджета:** 5 (orchestrator) + 20 + 35 + 10 = **70 ms** внутри deadline upstream; вместе с edge overhead — **75 ms** при лимите партнёра **80 ms**, запас **5 ms** на jitter и очереди.
 
 Сумма budgets контролируется orchestrator; при нехватке — early **no-bid**.
 
@@ -172,7 +176,7 @@ Structured JSON: `request_id`, `dsp_partner_id`, `duration_ms`, `decision`, `nbr
 | Атрибут                | Цель                                                            |
 |------------------------|-----------------------------------------------------------------|
 | Пропускная способность | ≥ **18 000 RPS** bid (горизонтальное масштабирование реплик)    |
-| Latency overhead edge  | p95 **≤ 5–10 ms** (TLS + parse + route)                         |
+| Latency overhead edge  | p95 **≤ 5 ms** (TLS + parse + route)                            |
 | Availability           | Независимость от UI Gateway; multi-AZ                           |
 | Конфигурация           | GitOps / declarative; **запрет** маршрутов кабинета в RTB vhost |
 

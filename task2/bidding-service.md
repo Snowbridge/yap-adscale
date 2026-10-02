@@ -66,7 +66,7 @@ DSP **не** вызывает Bidding Service напрямую. Контракт
 
 #### RPC `EvaluateBid`
 
-Unary, deadline наследуется от gateway (ориентир **≤ 50 ms** на Bidding + Redis).
+Unary, deadline наследуется от gateway (ориентир **≤ 35 ms** на Bidding + Redis).
 
 **EvaluateBidRequest (основные поля):**
 
@@ -130,7 +130,7 @@ Orchestration: gateway или лёгкий **Bid Orchestrator** (stateless) вы
 | Billing PostgreSQL           | —                      | **запрещено** | Баланс — проекция `billing.balance` |
 | REST/gRPC к Campaign/Billing | —                      | **запрещено** | ADR-006                             |
 
-**SLO сервиса:** P95 обработки `EvaluateBid` (без gateway) **≤ 40–50 ms** при P95 Redis **≤ 5 ms**, чтобы в сумме с Targeting и Creative уложиться в **≤ 80 ms** end-to-end.
+**SLO сервиса:** P95 обработки `EvaluateBid` (без gateway) **≤ 35 ms** при P95 Redis **≤ 5 ms** — бюджет Bidding в цепочке orchestrator 5 + Targeting 20 + Bidding 35 + Creative 10 = 70 ms, что с edge overhead 5 ms укладывается в **≤ 80 ms** end-to-end ([api-gateway.md §5.2](api-gateway.md#52-таймауты-и-бюджет-sla)).
 
 ---
 

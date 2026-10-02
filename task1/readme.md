@@ -64,4 +64,5 @@
 | Эволюция без остановки бизнеса | [ADR-001](ADR/ADR-001-evolution-strategy.md) |
 | Kafka как шина | [ADR-004](ADR/ADR-004-message-broker-kafka.md) |
 | Два шлюза на edge | [ADR-005](ADR/ADR-005-dual-edge-gateway.md) |
+| RTB hot path только Redis | [ADR-006](ADR/ADR-006-rtb-in-memory-hot-path.md) |
 | Визуализация TO-BE | [05-c4-container-to-be.puml](diagrams/05-c4-container-to-be.puml) |

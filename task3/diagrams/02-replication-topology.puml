@@ -1,0 +1,47 @@
+@startuml
+title Топология репликации и шардирования (TO-BE)
+
+skinparam componentStyle rectangle
+
+package "PostgreSQL campaign-db" {
+  node "Primary" as CampP
+  node "Async Read Replica" as CampR
+  CampP --> CampR : streaming replication
+}
+
+package "PostgreSQL billing-db" {
+  node "Primary" as BillP
+  node "Sync Standby" as BillS
+  BillP --> BillS : sync replication
+}
+
+package "Redis Cluster RTB" {
+  node "Shard 1 Master" as R1M
+  node "Shard 1 Replica" as R1R
+  node "Shard N Master" as RNM
+  node "Shard N Replica" as RNR
+  R1M --> R1R
+  RNM --> RNR
+  note bottom of R1M
+    Hash slots
+    keys with {campaign_id}
+  end note
+}
+
+package "ClickHouse" {
+  node "Shard 1 Replica" as CH1
+  node "Shard 2 Replica" as CH2
+  node "Reporting Replica Group" as CHR
+  CH1 .. CH2 : Distributed
+  CHR .. CH1 : read path UI
+}
+
+package "Kafka" {
+  node "Broker x3 RF=3" as K
+  note right of K
+    Partitions by
+    campaign_id / advertiser_id
+  end note
+}
+
+@enduml
